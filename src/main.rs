@@ -93,6 +93,11 @@ impl Default for App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut style = (*ctx.style()).clone();
+        style.visuals = egui::Visuals::light();
+        style.visuals.window_fill = egui::Color32::from_rgb(0, 160, 225);
+        style.visuals.panel_fill = egui::Color32::from_rgb(0, 160, 225);
+        ctx.set_style(style);
         if let Some(promise) = self.promise.take() {
             if let Some(result) = promise.ready() {
                 self.cur_state = match result {
@@ -114,8 +119,13 @@ impl eframe::App for App {
                 ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
                     ui.heading(egui::RichText::new("Weather Dashboard").size(24.0).strong());
                     ui.add_space(250.0);
-                    ui.label(egui::RichText::new("Introduceti orasul").size(24.0));
-                    ui.text_edit_singleline(&mut self.city_name);
+                    ui.label(egui::RichText::new("Introduceti locatia").size(24.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.city_name)
+                            .font(egui::FontId::proportional(20.0))
+                            .desired_width(300.0)
+                            .horizontal_align(egui::Align::Center),
+                    );
 
                     if ui.button("search").clicked() {
                         let city = self.city_name.clone();
@@ -136,24 +146,43 @@ impl eframe::App for App {
                 temperature,
                 forecast,
             } => {
-                ui.heading(format!("vremea in {}", location));
-                ui.add_space(10.0);
-                ui.colored_label(
-                    egui::Color32::GREEN,
-                    egui::RichText::new(format!("{} C", temperature)).size(24.0),
-                );
+                ui.vertical_centered(|ui| {
+                    ui.colored_label(
+                        egui::Color32::WHITE,
+                        egui::RichText::new(format!("{}", location))
+                            .size(32.0)
+                            .strong(),
+                    );
+                    ui.colored_label(
+                        egui::Color32::WHITE,
+                        egui::RichText::new(format!("{} °C", temperature)).size(24.0),
+                    );
+                });
+                ui.add_space(50.0);
                 ui.with_layout(
                     egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(false),
                     |ui| {
+                        let card_style = egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(50, 100, 115))
+                            .rounding(8.0)
+                            .stroke(egui::Stroke::new(
+                                2.0,
+                                egui::Color32::from_rgb(100, 150, 200),
+                            ))
+                            .inner_margin(10.0);
+                        ui.add_space(65.0);
                         for i in 0..7 {
-                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                            card_style.show(ui, |ui| {
                                 ui.set_max_width(150.0);
                                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.label(
-                                        egui::RichText::new(format!("{}", forecast.time[i]))
-                                            .strong(),
+                                    ui.colored_label(
+                                        egui::Color32::WHITE,
+                                        egui::RichText::new(forecast.time[i].to_string()).strong(),
                                     );
-                                    ui.label(egui::RichText::new("MAX").size(10.0));
+                                    ui.colored_label(
+                                        egui::Color32::WHITE,
+                                        egui::RichText::new("MAX").size(10.0),
+                                    );
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "{}°C",
@@ -161,27 +190,31 @@ impl eframe::App for App {
                                         ))
                                         .size(24.0)
                                         .strong()
-                                        .color(egui::Color32::RED),
+                                        .color(egui::Color32::WHITE),
                                     );
-                                    ui.label(egui::RichText::new("MIN").size(10.0));
+                                    ui.colored_label(
+                                        egui::Color32::WHITE,
+                                        egui::RichText::new("MAX").size(10.0),
+                                    );
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "{}°C",
                                             forecast.temperature_2m_min[i]
                                         ))
                                         .size(18.0)
-                                        .color(egui::Color32::BLUE),
+                                        .color(egui::Color32::WHITE),
                                     );
                                 });
                             });
-                            ui.add_space(10.0);
+                            ui.add_space(25.0);
                         }
                     },
                 );
-
-                if ui.button("back").clicked() {
-                    self.cur_state = AppState::Search;
-                }
+                ui.vertical_centered(|ui| {
+                    if ui.button("back").clicked() {
+                        self.cur_state = AppState::Search;
+                    }
+                });
             }
 
             AppState::Error(_err) => {
