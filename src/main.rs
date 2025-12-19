@@ -8,7 +8,8 @@ enum AppState {
     Loading,
     Result {
         location: String,
-        temperature: f32,
+        current: CurrentData,
+        hourly: HourlyData,
         forecast: DailyForecast,
     },
     Error(String),
@@ -25,12 +26,18 @@ struct GeoLocation {
 #[derive(Deserialize, Debug)]
 struct WeatherResponse {
     current: CurrentData,
+    hourly: HourlyData,
     daily: DailyForecast,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 struct CurrentData {
     temperature_2m: f32,
+}
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+struct HourlyData {
+    time: Vec<String>,
+    temperature_2m: Vec<f32>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -40,7 +47,7 @@ struct DailyForecast {
     temperature_2m_max: Vec<f32>,
 }
 
-async fn fetch_weather(city: String) -> Result<(f32, DailyForecast), String> {
+async fn fetch_weather(city: String) -> Result<(CurrentData, HourlyData, DailyForecast), String> {
     let geo_url = format!(
         "https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=ro&format=json",
         city
@@ -62,7 +69,7 @@ async fn fetch_weather(city: String) -> Result<(f32, DailyForecast), String> {
         None => return Err("Orașul nu a fost găsit.".to_string()),
     };
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7",
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7&hourly=temperature_2m",
         loc.latitude, loc.longitude
     );
     let w_resp = match reqwest::get(&weather_url).await {
@@ -73,12 +80,12 @@ async fn fetch_weather(city: String) -> Result<(f32, DailyForecast), String> {
         Ok(data) => data,
         Err(e) => return Err(format!("Eroare JSON Vreme: {}", e)),
     };
-    Ok((w_data.current.temperature_2m, w_data.daily))
+    Ok((w_data.current, w_data.hourly, w_data.daily))
 }
 struct App {
     city_name: String,
     cur_state: AppState,
-    promise: Option<Promise<Result<(f32, DailyForecast), String>>>,
+    promise: Option<Promise<Result<(CurrentData, HourlyData, DailyForecast), String>>>,
 }
 
 impl Default for App {
@@ -101,9 +108,10 @@ impl eframe::App for App {
         if let Some(promise) = self.promise.take() {
             if let Some(result) = promise.ready() {
                 self.cur_state = match result {
-                    Ok((temp, fore)) => AppState::Result {
+                    Ok((cur, hour, fore)) => AppState::Result {
                         location: self.city_name.clone(),
-                        temperature: *temp,
+                        current: cur.clone(),
+                        hourly: hour.clone(),
                         forecast: fore.clone(),
                     },
                     Err(err) => AppState::Error(err.clone()),
@@ -143,33 +151,39 @@ impl eframe::App for App {
             }
             AppState::Result {
                 location,
-                temperature,
+                current,
                 forecast,
+                hourly,
             } => {
+                let card_style = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 50))
+                    .rounding(8.0)
+                    .stroke(egui::Stroke::new(
+                        2.0,
+                        egui::Color32::from_rgb(100, 150, 200),
+                    ))
+                    .inner_margin(10.0);
                 ui.vertical_centered(|ui| {
-                    ui.colored_label(
-                        egui::Color32::WHITE,
-                        egui::RichText::new(format!("{}", location))
-                            .size(32.0)
-                            .strong(),
-                    );
-                    ui.colored_label(
-                        egui::Color32::WHITE,
-                        egui::RichText::new(format!("{} °C", temperature)).size(24.0),
-                    );
+                    card_style.show(ui, |ui| {
+                        ui.set_max_width(150.0);
+                        ui.colored_label(
+                            egui::Color32::WHITE,
+                            egui::RichText::new(location.to_string())
+                                .size(32.0)
+                                .strong(),
+                        );
+                        ui.colored_label(
+                            egui::Color32::WHITE,
+                            egui::RichText::new(format!("{} °C", current.temperature_2m))
+                                .size(24.0),
+                        );
+                    });
                 });
+
                 ui.add_space(50.0);
                 ui.with_layout(
                     egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(false),
                     |ui| {
-                        let card_style = egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(50, 100, 115))
-                            .rounding(8.0)
-                            .stroke(egui::Stroke::new(
-                                2.0,
-                                egui::Color32::from_rgb(100, 150, 200),
-                            ))
-                            .inner_margin(10.0);
                         ui.add_space(65.0);
                         for i in 0..7 {
                             card_style.show(ui, |ui| {
@@ -194,7 +208,7 @@ impl eframe::App for App {
                                     );
                                     ui.colored_label(
                                         egui::Color32::WHITE,
-                                        egui::RichText::new("MAX").size(10.0),
+                                        egui::RichText::new("MIN").size(10.0),
                                     );
                                     ui.label(
                                         egui::RichText::new(format!(
@@ -210,10 +224,14 @@ impl eframe::App for App {
                         }
                     },
                 );
+                ui.add_space(200.0);
                 ui.vertical_centered(|ui| {
-                    if ui.button("back").clicked() {
-                        self.cur_state = AppState::Search;
-                    }
+                    card_style.show(ui, |ui| {
+                        ui.set_max_width(150.0);
+                        if ui.button("back").clicked() {
+                            self.cur_state = AppState::Search;
+                        }
+                    });
                 });
             }
 
