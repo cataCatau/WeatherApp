@@ -224,6 +224,37 @@ impl eframe::App for App {
                         }
                     },
                 );
+                egui::ScrollArea::vertical()
+                    .max_height(300.0)
+                    .auto_shrink([true, true])
+                    .show(ui, |ui| {
+                        ui.add_space(65.0);
+                        for i in 0..24 {
+                            card_style.show(ui, |ui| {
+                                ui.set_max_width(150.0);
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                    let only_hour = match hourly.time[i].split('T').last() {
+                                        Some(hour) => hour,
+                                        None => &hourly.time[i],
+                                    };
+                                    ui.colored_label(
+                                        egui::Color32::WHITE,
+                                        egui::RichText::new(only_hour).strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}°C",
+                                            hourly.temperature_2m[i]
+                                        ))
+                                        .size(24.0)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                    );
+                                });
+                            });
+                            ui.add_space(25.0);
+                        }
+                    });
                 ui.add_space(200.0);
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
