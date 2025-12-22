@@ -192,12 +192,9 @@ impl eframe::App for App {
                 aqi,
             } => {
                 let card_style = egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 50))
-                    .rounding(8.0)
-                    .stroke(egui::Stroke::new(
-                        2.0,
-                        egui::Color32::from_rgb(100, 150, 200),
-                    ))
+                    .fill(egui::Color32::from_rgba_premultiplied(20, 30, 40, 180))
+                    .rounding(egui::Rounding::same(16.0))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
                     .inner_margin(10.0);
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
@@ -217,90 +214,76 @@ impl eframe::App for App {
                 });
 
                 ui.add_space(50.0);
-                ui.with_layout(
-                    egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(false),
-                    |ui| {
-                        ui.add_space(65.0);
-                        for i in 0..7 {
-                            card_style.show(ui, |ui| {
-                                ui.set_max_width(150.0);
-                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.colored_label(
-                                        egui::Color32::WHITE,
-                                        egui::RichText::new(forecast.time[i].to_string()).strong(),
-                                    );
-                                    ui.colored_label(
-                                        egui::Color32::WHITE,
-                                        egui::RichText::new("MAX").size(10.0),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{}°C",
-                                            forecast.temperature_2m_max[i]
-                                        ))
-                                        .size(24.0)
-                                        .strong()
-                                        .color(egui::Color32::WHITE),
-                                    );
-                                    ui.colored_label(
-                                        egui::Color32::WHITE,
-                                        egui::RichText::new("MIN").size(10.0),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{}°C",
-                                            forecast.temperature_2m_min[i]
-                                        ))
-                                        .size(18.0)
-                                        .color(egui::Color32::WHITE),
+                ui.horizontal(|ui| {
+                    egui::ScrollArea::horizontal()
+                        .max_height(300.0)
+                        .auto_shrink([true, true])
+                        .show(ui, |ui| {
+                            for i in 0..24 {
+                                card_style.show(ui, |ui| {
+                                    ui.set_max_width(200.0);
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            let only_hour = match hourly.time[i].split('T').last() {
+                                                Some(hour) => hour,
+                                                None => &hourly.time[i],
+                                            };
+                                            ui.colored_label(
+                                                egui::Color32::WHITE,
+                                                egui::RichText::new(only_hour).strong(),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{}°C",
+                                                    hourly.temperature_2m[i]
+                                                ))
+                                                .size(24.0)
+                                                .strong()
+                                                .color(egui::Color32::WHITE),
+                                            );
+                                        },
                                     );
                                 });
-                            });
-                            ui.add_space(25.0);
-                        }
-                    },
-                );
-                ui.add_space(50.0);
+                                ui.add_space(25.0);
+                            }
+                        });
+                });
                 ui.horizontal_top(|ui| {
-                    ui.add_space(50.0);
+                    ui.with_layout(
+                        egui::Layout::top_down(egui::Align::LEFT).with_main_wrap(false),
+                        |ui| {
+                            ui.add_space(20.0);
+                            for i in 0..7 {
+                                card_style.show(ui, |ui| {
+                                    ui.set_max_width(150.0);
+                                    ui.with_layout(
+                                        egui::Layout::top_down(egui::Align::Center),
+                                        |ui| {
+                                            ui.colored_label(
+                                                egui::Color32::WHITE,
+                                                egui::RichText::new(forecast.time[i].to_string())
+                                                    .strong(),
+                                            );
+                                            ui.colored_label(
+                                                egui::Color32::WHITE,
+                                                egui::RichText::new(format!(
+                                                    "MIN : {:?}   MAX : {:?} ",
+                                                    forecast.temperature_2m_min[i],
+                                                    forecast.temperature_2m_max[i]
+                                                ))
+                                                .size(10.0),
+                                            );
+                                        },
+                                    );
+                                });
+                                ui.add_space(20.0);
+                            }
+                        },
+                    );
+                    ui.add_space(430.0);
                     ui.vertical(|ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height(300.0)
-                            .auto_shrink([true, true])
-                            .show(ui, |ui| {
-                                for i in 0..24 {
-                                    card_style.show(ui, |ui| {
-                                        ui.set_max_width(200.0);
-                                        ui.with_layout(
-                                            egui::Layout::top_down(egui::Align::Center),
-                                            |ui| {
-                                                let only_hour =
-                                                    match hourly.time[i].split('T').last() {
-                                                        Some(hour) => hour,
-                                                        None => &hourly.time[i],
-                                                    };
-                                                ui.colored_label(
-                                                    egui::Color32::WHITE,
-                                                    egui::RichText::new(only_hour).strong(),
-                                                );
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "{}°C",
-                                                        hourly.temperature_2m[i]
-                                                    ))
-                                                    .size(24.0)
-                                                    .strong()
-                                                    .color(egui::Color32::WHITE),
-                                                );
-                                            },
-                                        );
-                                    });
-                                    ui.add_space(25.0);
-                                }
-                            });
-                    });
-                    ui.add_space(200.0);
-                    ui.vertical(|ui| {
+                        ui.add_space(20.0);
                         card_style.show(ui, |ui| {
                             ui.set_width(250.0);
                             ui.set_height(200.0);
@@ -416,8 +399,9 @@ impl eframe::App for App {
                                 .text(format!("O3: {}", aqi.ozone));
                             ui.add(progress_bar);
                         });
-                    })
+                    });
                 });
+
                 ui.add_space(20.0);
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
