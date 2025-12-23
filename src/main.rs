@@ -1,7 +1,10 @@
 use eframe::egui;
-use egui::{Align, Color32};
+use egui::{Align, Color32, RichText};
 use poll_promise::Promise;
-use serde::Deserialize;
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 type FullWeatherData = (CurrentData, HourlyData, DailyForecast, CurrentAqi);
 #[derive(Debug, PartialEq, Clone)]
@@ -50,6 +53,7 @@ struct CurrentAqi {
 #[derive(Deserialize, Debug, PartialEq, Clone)]
 struct CurrentData {
     temperature_2m: f32,
+    weather_code: i32,
 }
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 struct HourlyData {
@@ -62,6 +66,82 @@ struct DailyForecast {
     time: Vec<String>,
     temperature_2m_min: Vec<f32>,
     temperature_2m_max: Vec<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+struct Favorites {
+    locations: Vec<String>,
+}
+
+impl Favorites {
+    fn load() -> Self {
+        if Path::new("favorites.json").exists() {
+            if let Ok(content) = fs::read_to_string("favorites.json") {
+                if let Ok(favs) = serde_json::from_str(&content) {
+                    return favs;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    fn save(&self) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = fs::write("favorites.json", json);
+        }
+    }
+
+    fn add(&mut self, city: String) {
+        if !self.locations.contains(&city) {
+            self.locations.push(city);
+            self.save();
+        }
+    }
+
+    fn remove(&mut self, city: &String) {
+        self.locations.retain(|x| x != city);
+        self.save();
+    }
+}
+
+fn get_pollution_color(
+    val: f32,
+    limit_good: f32,
+    limit_fair: f32,
+    limit_mod: f32,
+    limit_poor: f32,
+) -> egui::Color32 {
+    if val < limit_good {
+        egui::Color32::LIGHT_GREEN
+    } else if val < limit_fair {
+        egui::Color32::GREEN
+    } else if val < limit_mod {
+        egui::Color32::YELLOW
+    } else if val < limit_poor {
+        egui::Color32::RED
+    } else {
+        egui::Color32::BLACK
+    }
+}
+fn get_weather_emoji(code: u32) -> &'static str {
+    match code {
+        0 => "☀️",                    // Cer senin
+        1 => "🌤️",                    // Predominant senin
+        2 => "⛅",                    // Parțial noros
+        3 => "☁️",                    // Înnorat
+        45 | 48 => "🌫️",              // Ceață
+        51 | 53 | 55 => "drizzle 🌧️", // Burniță
+        56 | 57 => "🌧️❄️",            // Burniță care îngheață
+        61 | 63 | 65 => "🌧️",         // Ploaie
+        66 | 67 => "🌨️",              // Ploaie care îngheață
+        71 | 73 | 75 => "❄️",         // Ninsoare
+        77 => "🌨️",                   // Grăunțe de zăpadă
+        80 | 81 | 82 => "🌦️",         // Averse de ploaie
+        85 | 86 => "❄️🌨️",            // Averse de zăpadă
+        95 => "⛈️",                   // Furtună
+        96 | 99 => "⛈️🌨️",            // Furtună cu grindină
+        _ => "❓",                    // Necunoscut
+    }
 }
 
 async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
@@ -86,7 +166,7 @@ async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
         None => return Err("Orașul nu a fost găsit.".to_string()),
     };
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7&hourly=temperature_2m",
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7&hourly=temperature_2m",
         loc.latitude, loc.longitude
     );
     let w_resp = match reqwest::get(&weather_url).await {
@@ -120,6 +200,7 @@ struct App {
     city_name: String,
     cur_state: AppState,
     promise: Option<Promise<Result<FullWeatherData, String>>>,
+    favorites: Favorites,
 }
 
 impl Default for App {
@@ -128,6 +209,7 @@ impl Default for App {
             city_name: "Bucuresti".to_owned(),
             cur_state: AppState::Search,
             promise: None,
+            favorites: Favorites::load(),
         }
     }
 }
@@ -136,8 +218,8 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut style = (*ctx.style()).clone();
         style.visuals = egui::Visuals::light();
-        style.visuals.window_fill = egui::Color32::from_rgb(0, 160, 225);
-        style.visuals.panel_fill = egui::Color32::from_rgb(0, 160, 225);
+        style.visuals.window_fill = egui::Color32::from_rgb(15, 23, 42);
+        style.visuals.panel_fill = egui::Color32::from_rgb(15, 23, 42);
         ctx.set_style(style);
         if let Some(promise) = self.promise.take() {
             if let Some(result) = promise.ready() {
@@ -157,27 +239,90 @@ impl eframe::App for App {
                 ctx.request_repaint();
             }
         }
+        let mut next_state = None;
         egui::CentralPanel::default().show(ctx, |ui| match &self.cur_state {
             AppState::Search => {
                 ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
                     ui.heading(egui::RichText::new("Weather Dashboard").size(24.0).strong());
                     ui.add_space(250.0);
                     ui.label(egui::RichText::new("Introduceti locatia").size(24.0));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.city_name)
-                            .font(egui::FontId::proportional(20.0))
-                            .desired_width(300.0)
-                            .horizontal_align(egui::Align::Center),
-                    );
+                    ui.scope(|ui| {
+                        ui.set_max_width(340.0);
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.city_name)
+                                    .font(egui::FontId::proportional(20.0))
+                                    .desired_width(300.0)
+                                    .horizontal_align(egui::Align::Center),
+                            );
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("🔎").size(24.0).color(Color32::WHITE),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
+                                let city = self.city_name.clone();
+                                self.cur_state = AppState::Loading;
+                                self.promise =
+                                    Some(Promise::spawn_async(
+                                        async move { fetch_weather(city).await },
+                                    ));
+                            }
+                        });
+                    });
 
-                    if ui.button("search").clicked() {
-                        let city = self.city_name.clone();
-                        self.cur_state = AppState::Loading;
-                        self.promise =
-                            Some(Promise::spawn_async(
-                                async move { fetch_weather(city).await },
-                            ));
-                    }
+                    ui.scope(|ui| {
+                        ui.set_max_width(300.0);
+                        ui.collapsing(
+                            RichText::new("⭐ Locații Favorite")
+                                .strong()
+                                .color(Color32::GOLD),
+                            |ui| {
+                                ui.add_space(10.0);
+                                let favs = self.favorites.locations.clone();
+
+                                for location in favs {
+                                    ui.horizontal(|ui| {
+                                        ui.set_width(300.0);
+
+                                        ui.with_layout(
+                                            egui::Layout::top_down(Align::Center),
+                                            |ui| {
+                                                ui.horizontal(|ui| {
+                                                    if ui
+                                                        .button(RichText::new(&location).size(18.0))
+                                                        .clicked()
+                                                    {
+                                                        self.city_name = location.clone();
+                                                        self.cur_state = AppState::Loading;
+                                                        let location_clone = location.clone();
+                                                        self.promise = Some(Promise::spawn_async(
+                                                            async move {
+                                                                fetch_weather(location_clone).await
+                                                            },
+                                                        ));
+                                                    }
+
+                                                    if ui
+                                                        .small_button(
+                                                            RichText::new("❌").color(Color32::RED),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        self.favorites.remove(&location);
+                                                    }
+                                                });
+                                            },
+                                        );
+                                    });
+                                    ui.add_space(5.0);
+                                }
+                            },
+                        );
+                    });
                 });
             }
             AppState::Loading => {
@@ -193,121 +338,140 @@ impl eframe::App for App {
             } => {
                 let card_style = egui::Frame::none()
                     .fill(egui::Color32::from_rgba_premultiplied(20, 30, 40, 180))
-                    .rounding(egui::Rounding::same(16.0))
+                    .rounding(16.0)
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
                     .inner_margin(10.0);
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
-                        ui.set_max_width(150.0);
-                        ui.colored_label(
-                            egui::Color32::WHITE,
-                            egui::RichText::new(location.to_string())
-                                .size(32.0)
-                                .strong(),
+                        ui.set_width(350.0);
+                        ui.set_max_height(100.0);
+                        ui.with_layout(
+                            egui::Layout::top_down(egui::Align::Center)
+                                .with_main_align(egui::Align::Center),
+                            |ui| {
+                                ui.heading(
+                                    RichText::new(location)
+                                        .size(32.0)
+                                        .strong()
+                                        .color(Color32::WHITE),
+                                );
+
+                                let is_fav = self.favorites.locations.contains(location);
+                                let btn_text = "☆";
+                                let btn_color = if is_fav { Color32::GOLD } else { Color32::GRAY };
+
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new(btn_text).size(24.0).color(btn_color),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .clicked()
+                                {
+                                    if is_fav {
+                                        self.favorites.remove(location);
+                                    } else {
+                                        self.favorites.add(location.clone());
+                                    }
+                                }
+                            },
                         );
-                        ui.colored_label(
-                            egui::Color32::WHITE,
-                            egui::RichText::new(format!("{} °C", current.temperature_2m))
-                                .size(24.0),
+
+                        ui.label(
+                            RichText::new(format!("{} °C", current.temperature_2m))
+                                .size(28.0)
+                                .color(Color32::from_rgb(100, 200, 255)),
                         );
                     });
                 });
-
                 ui.add_space(50.0);
-                ui.horizontal(|ui| {
-                    egui::ScrollArea::horizontal()
-                        .max_height(300.0)
-                        .auto_shrink([true, true])
-                        .show(ui, |ui| {
-                            for i in 0..24 {
-                                card_style.show(ui, |ui| {
-                                    ui.set_max_width(200.0);
-                                    ui.with_layout(
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| {
-                                            let only_hour = match hourly.time[i].split('T').last() {
-                                                Some(hour) => hour,
-                                                None => &hourly.time[i],
-                                            };
-                                            ui.colored_label(
-                                                egui::Color32::WHITE,
-                                                egui::RichText::new(only_hour).strong(),
-                                            );
-                                            ui.label(
-                                                egui::RichText::new(format!(
-                                                    "{}°C",
-                                                    hourly.temperature_2m[i]
-                                                ))
-                                                .size(24.0)
-                                                .strong()
-                                                .color(egui::Color32::WHITE),
-                                            );
-                                        },
-                                    );
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        card_style.show(ui, |ui| {
+                            egui::ScrollArea::horizontal()
+                                .max_height(300.0)
+                                .auto_shrink([true, true])
+                                .show(ui, |ui| {
+                                    for i in 0..24 {
+                                        ui.set_max_width(200.0);
+                                        ui.with_layout(
+                                            egui::Layout::top_down(egui::Align::Center),
+                                            |ui| {
+                                                let only_hour =
+                                                    match hourly.time[i].split('T').last() {
+                                                        Some(hour) => hour,
+                                                        None => &hourly.time[i],
+                                                    };
+                                                ui.colored_label(
+                                                    egui::Color32::WHITE,
+                                                    egui::RichText::new(only_hour).strong(),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{}°C",
+                                                        hourly.temperature_2m[i]
+                                                    ))
+                                                    .size(24.0)
+                                                    .strong()
+                                                    .color(egui::Color32::WHITE),
+                                                );
+                                            },
+                                        );
+                                        ui.add_space(25.0);
+                                    }
                                 });
-                                ui.add_space(25.0);
-                            }
                         });
+                    });
                 });
-                ui.horizontal_top(|ui| {
-                    ui.with_layout(
+                ui.columns(3, |cols| {
+                    cols[0].with_layout(
                         egui::Layout::top_down(egui::Align::LEFT).with_main_wrap(false),
                         |ui| {
                             ui.add_space(20.0);
-                            for i in 0..7 {
-                                card_style.show(ui, |ui| {
-                                    ui.set_max_width(150.0);
-                                    ui.with_layout(
-                                        egui::Layout::top_down(egui::Align::Center),
-                                        |ui| {
-                                            ui.colored_label(
-                                                egui::Color32::WHITE,
-                                                egui::RichText::new(forecast.time[i].to_string())
-                                                    .strong(),
-                                            );
-                                            ui.colored_label(
-                                                egui::Color32::WHITE,
-                                                egui::RichText::new(format!(
-                                                    "MIN : {:?}   MAX : {:?} ",
-                                                    forecast.temperature_2m_min[i],
-                                                    forecast.temperature_2m_max[i]
-                                                ))
-                                                .size(10.0),
-                                            );
-                                        },
-                                    );
-                                });
-                                ui.add_space(20.0);
-                            }
+                            card_style.show(ui, |ui| {
+                                ui.set_width(100.0);
+                                ui.heading("Daily Forecast");
+                                for i in 0..7 {
+                                    ui.separator();
+                                    ui.horizontal(|ui| {
+                                        ui.colored_label(
+                                            egui::Color32::WHITE,
+                                            egui::RichText::new(forecast.time[i].to_string())
+                                                .strong()
+                                                .size(20.0),
+                                        );
+                                        ui.colored_label(
+                                            egui::Color32::LIGHT_BLUE,
+                                            egui::RichText::new(format!(
+                                                "MIN : {:?}",
+                                                forecast.temperature_2m_min[i]
+                                            ))
+                                            .size(20.0),
+                                        );
+                                        ui.colored_label(
+                                            egui::Color32::RED,
+                                            egui::RichText::new(format!(
+                                                "MAX : {:?}",
+                                                forecast.temperature_2m_max[i]
+                                            ))
+                                            .size(20.0),
+                                        );
+                                        ui.add_space(10.0);
+                                    });
+                                    ui.add_space(10.0);
+                                }
+                            });
                         },
                     );
-                    ui.add_space(430.0);
-                    ui.vertical(|ui| {
+
+                    cols[1].vertical_centered(|ui| {
                         ui.add_space(20.0);
                         card_style.show(ui, |ui| {
                             ui.set_width(250.0);
-                            ui.set_height(200.0);
-                            ui.set_max_height(300.0);
 
-                            fn get_pollution_color(
-                                val: f32,
-                                limit_good: f32,
-                                limit_fair: f32,
-                                limit_mod: f32,
-                                limit_poor: f32,
-                            ) -> egui::Color32 {
-                                if val < limit_good {
-                                    egui::Color32::LIGHT_GREEN
-                                } else if val < limit_fair {
-                                    egui::Color32::GREEN
-                                } else if val < limit_mod {
-                                    egui::Color32::YELLOW
-                                } else if val < limit_poor {
-                                    egui::Color32::RED
-                                } else {
-                                    egui::Color32::BLACK
-                                }
-                            }
+                            ui.set_max_height(400.0);
+
                             //aqi
                             let color =
                                 get_pollution_color(aqi.european_aqi, 20.0, 40.0, 60.0, 80.0);
@@ -315,99 +479,114 @@ impl eframe::App for App {
                                 Color32::WHITE,
                                 egui::RichText::new("Air Quality Index").size(24.0).strong(),
                             );
-                            let progress = (aqi.european_aqi / 100.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("AQI: {}", aqi.european_aqi));
-                            ui.add(progress_bar);
+                            ui.colored_label(
+                                color,
+                                egui::RichText::new(format!("{}", aqi.european_aqi)).size(40.0),
+                            );
+                            ui.separator();
+                            ui.add_space(10.0);
                             //pm2.5
-                            let color = get_pollution_color(aqi.pm2_5, 10.0, 20.0, 25.0, 50.0);
-                            ui.colored_label(
-                                Color32::WHITE,
-                                egui::RichText::new("PM 2.5").size(24.0).strong(),
-                            );
-                            let progress = (aqi.pm2_5 / 100.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("PM 2.5: {}", aqi.pm2_5));
-                            ui.add(progress_bar);
-                            //CO
-                            let color = get_pollution_color(
-                                aqi.carbon_monoxide,
-                                1000.0,
-                                2500.0,
-                                5000.0,
-                                10000.0,
-                            );
-                            ui.colored_label(
-                                Color32::WHITE,
-                                egui::RichText::new("Carbon Monoxide").size(24.0).strong(),
-                            );
-                            let progress = (aqi.carbon_monoxide / 10000.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("CO: {}", aqi.carbon_monoxide));
-                            ui.add(progress_bar);
+                            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                                let color = get_pollution_color(aqi.pm2_5, 10.0, 20.0, 25.0, 50.0);
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("PM 2.5").size(24.0).strong(),
+                                );
+                                let progress = (aqi.pm2_5 / 100.0).clamp(0.0, 1.0);
+                                let progress_bar = egui::ProgressBar::new(progress)
+                                    .fill(color)
+                                    .desired_width(200.0)
+                                    .text(format!("PM: {}", aqi.pm2_5));
+                                ui.add(progress_bar);
+                                //CO
+                                let color = get_pollution_color(
+                                    aqi.carbon_monoxide,
+                                    1000.0,
+                                    2500.0,
+                                    5000.0,
+                                    10000.0,
+                                );
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("Carbon Monoxide").size(24.0).strong(),
+                                );
+                                let progress = (aqi.carbon_monoxide / 10000.0).clamp(0.0, 1.0);
+                                let progress_bar = egui::ProgressBar::new(progress)
+                                    .fill(color)
+                                    .desired_width(200.0)
+                                    .text(format!("CO: {}", aqi.carbon_monoxide));
+                                ui.add(progress_bar);
 
-                            //NO2
-                            let color =
-                                get_pollution_color(aqi.nitrogen_dioxide, 40.0, 90.0, 120.0, 230.0);
-                            ui.colored_label(
-                                Color32::WHITE,
-                                egui::RichText::new("Nitrogen Dioxide").size(24.0).strong(),
-                            );
-                            let progress = (aqi.nitrogen_dioxide / 340.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("NO2: {}", aqi.nitrogen_dioxide));
-                            ui.add(progress_bar);
+                                //NO2
+                                let color = get_pollution_color(
+                                    aqi.nitrogen_dioxide,
+                                    40.0,
+                                    90.0,
+                                    120.0,
+                                    230.0,
+                                );
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("Nitrogen Dioxide").size(24.0).strong(),
+                                );
+                                let progress = (aqi.nitrogen_dioxide / 340.0).clamp(0.0, 1.0);
+                                let progress_bar = egui::ProgressBar::new(progress)
+                                    .fill(color)
+                                    .desired_width(200.0)
+                                    .text(format!("NO2: {}", aqi.nitrogen_dioxide));
+                                ui.add(progress_bar);
 
-                            //SO2
-                            let color = get_pollution_color(
-                                aqi.sulphur_dioxide,
-                                100.0,
-                                200.0,
-                                350.0,
-                                500.0,
-                            );
-                            ui.colored_label(
-                                Color32::WHITE,
-                                egui::RichText::new("Sulphur Dioxide").size(24.0).strong(),
-                            );
-                            let progress = (aqi.sulphur_dioxide / 750.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("SO2: {}", aqi.sulphur_dioxide));
-                            ui.add(progress_bar);
+                                //SO2
+                                let color = get_pollution_color(
+                                    aqi.sulphur_dioxide,
+                                    100.0,
+                                    200.0,
+                                    350.0,
+                                    500.0,
+                                );
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("Sulphur Dioxide").size(24.0).strong(),
+                                );
+                                let progress = (aqi.sulphur_dioxide / 750.0).clamp(0.0, 1.0);
+                                let progress_bar = egui::ProgressBar::new(progress)
+                                    .fill(color)
+                                    .desired_width(200.0)
+                                    .text(format!("SO2: {}", aqi.sulphur_dioxide));
+                                ui.add(progress_bar);
 
-                            //O3
+                                //O3
 
-                            let color = get_pollution_color(aqi.ozone, 50.0, 100.0, 130.0, 240.0);
-                            ui.colored_label(
-                                Color32::WHITE,
-                                egui::RichText::new("Ozone").size(24.0).strong(),
-                            );
-                            let progress = (aqi.ozone / 380.0).clamp(0.0, 1.0);
-                            let progress_bar = egui::ProgressBar::new(progress)
-                                .fill(color)
-                                .desired_width(200.0)
-                                .text(format!("O3: {}", aqi.ozone));
-                            ui.add(progress_bar);
+                                let color =
+                                    get_pollution_color(aqi.ozone, 50.0, 100.0, 130.0, 240.0);
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("Ozone").size(24.0).strong(),
+                                );
+                                let progress = (aqi.ozone / 380.0).clamp(0.0, 1.0);
+                                let progress_bar = egui::ProgressBar::new(progress)
+                                    .fill(color)
+                                    .desired_width(200.0)
+                                    .text(format!("O3: {}", aqi.ozone));
+                                ui.add(progress_bar);
+                            });
                         });
                     });
                 });
-
                 ui.add_space(20.0);
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
-                        ui.set_max_width(150.0);
-                        if ui.button("back").clicked() {
-                            self.cur_state = AppState::Search;
+                        ui.set_max_width(10.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("🏠").size(40.0).color(Color32::WHITE),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
+                            next_state = Some(AppState::Search);
                         }
                     });
                 });
@@ -417,6 +596,10 @@ impl eframe::App for App {
                 ui.heading("eroare");
             }
         });
+
+        if let Some(state) = next_state {
+            self.cur_state = state;
+        }
     }
 }
 #[tokio::main]
