@@ -53,7 +53,10 @@ struct CurrentAqi {
 #[derive(Deserialize, Debug, PartialEq, Clone)]
 struct CurrentData {
     temperature_2m: f32,
-    weather_code: i32,
+    weather_code: u32,
+    surface_pressure: f32,
+    wind_speed_10m: f32,
+    precipitation: f32,
 }
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 struct HourlyData {
@@ -66,6 +69,8 @@ struct DailyForecast {
     time: Vec<String>,
     temperature_2m_min: Vec<f32>,
     temperature_2m_max: Vec<f32>,
+    uv_index_max: Vec<f32>,
+    sunrise: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -104,7 +109,7 @@ impl Favorites {
     }
 }
 
-fn get_pollution_color(
+fn get_metric_color(
     val: f32,
     limit_good: f32,
     limit_fair: f32,
@@ -112,16 +117,29 @@ fn get_pollution_color(
     limit_poor: f32,
 ) -> egui::Color32 {
     if val < limit_good {
-        egui::Color32::LIGHT_GREEN
-    } else if val < limit_fair {
         egui::Color32::GREEN
-    } else if val < limit_mod {
+    } else if val < limit_fair {
         egui::Color32::YELLOW
+    } else if val < limit_mod {
+        egui::Color32::from_rgb(255, 165, 0)
     } else if val < limit_poor {
         egui::Color32::RED
     } else {
-        egui::Color32::BLACK
+        egui::Color32::from_rgb(52, 21, 57)
     }
+}
+
+fn draw_metric(ui: &mut egui::Ui, name: &str, val: f32, max: f32, unit: &str, color: Color32) {
+    ui.colored_label(
+        Color32::WHITE,
+        egui::RichText::new(name).size(24.0).strong(),
+    );
+    let progress = (val / max).clamp(0.0, 1.0);
+    let progress_bar = egui::ProgressBar::new(progress)
+        .fill(color)
+        .desired_width(200.0)
+        .text(egui::RichText::new(format!("{} {}", val, unit)).color(egui::Color32::BLACK));
+    ui.add(progress_bar);
 }
 fn get_weather_emoji(code: u32) -> &'static str {
     match code {
@@ -136,7 +154,7 @@ fn get_weather_emoji(code: u32) -> &'static str {
         66 | 67 => "🌨️",              // Ploaie care îngheață
         71 | 73 | 75 => "❄️",         // Ninsoare
         77 => "🌨️",                   // Grăunțe de zăpadă
-        80 | 81 | 82 => "🌦️",         // Averse de ploaie
+        80..82 => "🌦️",               // Averse de ploaie
         85 | 86 => "❄️🌨️",            // Averse de zăpadă
         95 => "⛈️",                   // Furtună
         96 | 99 => "⛈️🌨️",            // Furtună cu grindină
@@ -166,7 +184,7 @@ async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
         None => return Err("Orașul nu a fost găsit.".to_string()),
     };
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7&hourly=temperature_2m",
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code,surface_pressure,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,uv_index_max&timezone=auto&forecast_days=7&hourly=temperature_2m",
         loc.latitude, loc.longitude
     );
     let w_resp = match reqwest::get(&weather_url).await {
@@ -399,7 +417,7 @@ impl eframe::App for App {
                                             egui::Layout::top_down(egui::Align::Center),
                                             |ui| {
                                                 let only_hour =
-                                                    match hourly.time[i].split('T').last() {
+                                                    match hourly.time[i].split('T').next_back() {
                                                         Some(hour) => hour,
                                                         None => &hourly.time[i],
                                                     };
@@ -473,8 +491,7 @@ impl eframe::App for App {
                             ui.set_max_height(400.0);
 
                             //aqi
-                            let color =
-                                get_pollution_color(aqi.european_aqi, 20.0, 40.0, 60.0, 80.0);
+                            let color = get_metric_color(aqi.european_aqi, 20.0, 40.0, 60.0, 80.0);
                             ui.colored_label(
                                 Color32::WHITE,
                                 egui::RichText::new("Air Quality Index").size(24.0).strong(),
@@ -487,88 +504,123 @@ impl eframe::App for App {
                             ui.add_space(10.0);
                             //pm2.5
                             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                                let color = get_pollution_color(aqi.pm2_5, 10.0, 20.0, 25.0, 50.0);
-                                ui.colored_label(
-                                    Color32::WHITE,
-                                    egui::RichText::new("PM 2.5").size(24.0).strong(),
-                                );
-                                let progress = (aqi.pm2_5 / 100.0).clamp(0.0, 1.0);
-                                let progress_bar = egui::ProgressBar::new(progress)
-                                    .fill(color)
-                                    .desired_width(200.0)
-                                    .text(format!("PM: {}", aqi.pm2_5));
-                                ui.add(progress_bar);
+                                let color = get_metric_color(aqi.pm2_5, 10.0, 20.0, 25.0, 50.0);
+                                draw_metric(ui, "PM 2.5", aqi.pm2_5, 100.0, " ", color);
                                 //CO
-                                let color = get_pollution_color(
+                                let color = get_metric_color(
                                     aqi.carbon_monoxide,
                                     1000.0,
                                     2500.0,
                                     5000.0,
                                     10000.0,
                                 );
-                                ui.colored_label(
-                                    Color32::WHITE,
-                                    egui::RichText::new("Carbon Monoxide").size(24.0).strong(),
+                                draw_metric(
+                                    ui,
+                                    "Carbon Monoxide",
+                                    aqi.carbon_monoxide,
+                                    10000.0,
+                                    " ",
+                                    color,
                                 );
-                                let progress = (aqi.carbon_monoxide / 10000.0).clamp(0.0, 1.0);
-                                let progress_bar = egui::ProgressBar::new(progress)
-                                    .fill(color)
-                                    .desired_width(200.0)
-                                    .text(format!("CO: {}", aqi.carbon_monoxide));
-                                ui.add(progress_bar);
 
                                 //NO2
-                                let color = get_pollution_color(
+                                let color = get_metric_color(
                                     aqi.nitrogen_dioxide,
                                     40.0,
                                     90.0,
                                     120.0,
                                     230.0,
                                 );
-                                ui.colored_label(
-                                    Color32::WHITE,
-                                    egui::RichText::new("Nitrogen Dioxide").size(24.0).strong(),
+                                draw_metric(
+                                    ui,
+                                    "Nitrogen Dioxide",
+                                    aqi.nitrogen_dioxide,
+                                    340.0,
+                                    " ",
+                                    color,
                                 );
-                                let progress = (aqi.nitrogen_dioxide / 340.0).clamp(0.0, 1.0);
-                                let progress_bar = egui::ProgressBar::new(progress)
-                                    .fill(color)
-                                    .desired_width(200.0)
-                                    .text(format!("NO2: {}", aqi.nitrogen_dioxide));
-                                ui.add(progress_bar);
 
                                 //SO2
-                                let color = get_pollution_color(
+                                let color = get_metric_color(
                                     aqi.sulphur_dioxide,
                                     100.0,
                                     200.0,
                                     350.0,
                                     500.0,
                                 );
-                                ui.colored_label(
-                                    Color32::WHITE,
-                                    egui::RichText::new("Sulphur Dioxide").size(24.0).strong(),
+                                draw_metric(
+                                    ui,
+                                    "Sulphur Dioxide",
+                                    aqi.sulphur_dioxide,
+                                    750.0,
+                                    " ",
+                                    color,
                                 );
-                                let progress = (aqi.sulphur_dioxide / 750.0).clamp(0.0, 1.0);
-                                let progress_bar = egui::ProgressBar::new(progress)
-                                    .fill(color)
-                                    .desired_width(200.0)
-                                    .text(format!("SO2: {}", aqi.sulphur_dioxide));
-                                ui.add(progress_bar);
 
                                 //O3
 
-                                let color =
-                                    get_pollution_color(aqi.ozone, 50.0, 100.0, 130.0, 240.0);
+                                let color = get_metric_color(aqi.ozone, 50.0, 100.0, 130.0, 240.0);
+
+                                draw_metric(ui, "Ozone", aqi.ozone, 380.0, " ", color);
+                            });
+                        });
+                    });
+                    cols[2].with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                        ui.add_space(20.0);
+                        ui.set_width(300.0);
+                        card_style.show(ui, |ui| {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                                 ui.colored_label(
-                                    Color32::WHITE,
-                                    egui::RichText::new("Ozone").size(24.0).strong(),
+                                    egui::Color32::WHITE,
+                                    egui::RichText::new(get_weather_emoji(current.weather_code))
+                                        .size(80.0),
                                 );
-                                let progress = (aqi.ozone / 380.0).clamp(0.0, 1.0);
-                                let progress_bar = egui::ProgressBar::new(progress)
-                                    .fill(color)
-                                    .desired_width(200.0)
-                                    .text(format!("O3: {}", aqi.ozone));
-                                ui.add(progress_bar);
+                                ui.add_space(20.0);
+                                //Wind Speed
+                                let color = get_metric_color(
+                                    current.wind_speed_10m,
+                                    20.0,
+                                    40.0,
+                                    60.0,
+                                    80.0,
+                                );
+                                draw_metric(
+                                    ui,
+                                    "Wind Speed",
+                                    current.wind_speed_10m,
+                                    100.0,
+                                    "km/h",
+                                    color,
+                                );
+                                let color =
+                                    get_metric_color(current.precipitation, 2.5, 5.0, 10.0, 15.0);
+                                draw_metric(
+                                    ui,
+                                    "Precipitation",
+                                    current.precipitation,
+                                    50.0,
+                                    "mm",
+                                    color,
+                                );
+                                ui.colored_label(
+                                    egui::Color32::WHITE,
+                                    egui::RichText::new(format!(
+                                        "Pressure : {} hPa",
+                                        current.surface_pressure
+                                    ))
+                                    .size(24.0),
+                                );
+                                let color =
+                                    get_metric_color(forecast.uv_index_max[0], 2.0, 5.0, 7.0, 10.0);
+                                draw_metric(
+                                    ui,
+                                    "Max UV Index",
+                                    forecast.uv_index_max[0],
+                                    11.0,
+                                    " ",
+                                    color,
+                                );
+                                // ui.colored_label(egui::Color32::WHITE,forecast.sunrise[0]);
                             });
                         });
                     });
@@ -613,3 +665,4 @@ async fn main() -> eframe::Result<()> {
 
     eframe::run_native("App", options, Box::new(|_cc| Box::new(App::default())))
 }
+// 67
