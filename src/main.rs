@@ -15,7 +15,7 @@ enum AppState {
         location: String,
         current: CurrentData,
         hourly: HourlyData,
-        forecast: DailyForecast,
+        forecast: Box<DailyForecast>,
         aqi: CurrentAqi,
     },
     Error(String),
@@ -64,6 +64,7 @@ struct HourlyData {
     temperature_2m: Vec<f32>,
 }
 
+//67
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 struct DailyForecast {
     time: Vec<String>,
@@ -80,13 +81,13 @@ struct Favorites {
 
 impl Favorites {
     fn load() -> Self {
-        if Path::new("favorites.json").exists() {
-            if let Ok(content) = fs::read_to_string("favorites.json") {
-                if let Ok(favs) = serde_json::from_str(&content) {
-                    return favs;
-                }
-            }
+        if Path::new("favorites.json").exists()
+            && let Ok(content) = fs::read_to_string("favorites.json")
+            && let Ok(favs) = serde_json::from_str(&content)
+        {
+            return favs;
         }
+
         Self::default()
     }
 
@@ -128,7 +129,15 @@ fn get_metric_color(
         egui::Color32::from_rgb(52, 21, 57)
     }
 }
-
+fn get_pressure_color(val: f32) -> Color32 {
+    if val < 1000.0 {
+        Color32::RED // presiune mica (furtuna)
+    } else if val < 1020.0 {
+        Color32::GREEN // presiune normala
+    } else {
+        Color32::from_rgb(100, 200, 255) //presiune mare (anticiclon, cer senin)
+    }
+}
 fn draw_metric(ui: &mut egui::Ui, name: &str, val: f32, max: f32, unit: &str, color: Color32) {
     ui.colored_label(
         Color32::WHITE,
@@ -184,28 +193,42 @@ async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
         None => return Err("Orașul nu a fost găsit.".to_string()),
     };
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code,surface_pressure,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,uv_index_max&timezone=auto&forecast_days=7&hourly=temperature_2m",
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code,surface_pressure,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,uv_index_max,sunrise&timezone=auto&forecast_days=7&hourly=temperature_2m",
         loc.latitude, loc.longitude
     );
-    let w_resp = match reqwest::get(&weather_url).await {
-        Ok(resp) => resp,
-        Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
-    };
-    let w_data = match w_resp.json::<WeatherResponse>().await {
-        Ok(data) => data,
-        Err(e) => return Err(format!("Eroare JSON Vreme: {}", e)),
-    };
     let poluation_url = format!(
         "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={}&longitude={}&current=european_aqi,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone",
         loc.latitude, loc.longitude
     );
-    let aqi_resp = match reqwest::get(&poluation_url).await {
-        Ok(resp) => resp,
-        Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
+    let w_task = async {
+        let w_resp = match reqwest::get(&weather_url).await {
+            Ok(resp) => resp,
+            Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
+        };
+        match w_resp.json::<WeatherResponse>().await {
+            Ok(data) => Ok(data),
+            Err(e) => Err(format!("Eroare JSON Vreme: {}", e)),
+        }
     };
-    let aqi_data = match aqi_resp.json::<AirQualityResponse>().await {
+    let aqi_task = async {
+        let aqi_resp = match reqwest::get(&poluation_url).await {
+            Ok(resp) => resp,
+            Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
+        };
+        match aqi_resp.json::<AirQualityResponse>().await {
+            Ok(data) => Ok(data),
+            Err(e) => Err(format!("Eroare JSON Vreme: {}", e)),
+        }
+    };
+    let (w_result, aqi_result) = tokio::join!(w_task, aqi_task);
+    let w_data = match w_result {
         Ok(data) => data,
-        Err(e) => return Err(format!("Eroare JSON Vreme: {}", e)),
+        Err(e) => return Err(e),
+    };
+
+    let aqi_data = match aqi_result {
+        Ok(data) => data,
+        Err(e) => return Err(e),
     };
     Ok((
         w_data.current,
@@ -246,7 +269,7 @@ impl eframe::App for App {
                         location: self.city_name.clone(),
                         current: cur.clone(),
                         hourly: hour.clone(),
-                        forecast: fore.clone(),
+                        forecast: Box::new(fore.clone()),
                         aqi: aqi_val.clone(),
                     },
                     Err(err) => AppState::Error(err.clone()),
@@ -501,7 +524,7 @@ impl eframe::App for App {
                                 egui::RichText::new(format!("{}", aqi.european_aqi)).size(40.0),
                             );
                             ui.separator();
-                            ui.add_space(10.0);
+                            ui.add_space(20.0);
                             //pm2.5
                             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                                 let color = get_metric_color(aqi.pm2_5, 10.0, 20.0, 25.0, 50.0);
@@ -570,12 +593,25 @@ impl eframe::App for App {
                         ui.set_width(300.0);
                         card_style.show(ui, |ui| {
                             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                                ui.add_space(5.0);
                                 ui.colored_label(
                                     egui::Color32::WHITE,
                                     egui::RichText::new(get_weather_emoji(current.weather_code))
                                         .size(80.0),
                                 );
+                                ui.separator();
                                 ui.add_space(20.0);
+                                // sunrise
+                                let only_hour = match forecast.sunrise[0].split('T').next_back() {
+                                    Some(hour) => hour,
+                                    None => &forecast.sunrise[0],
+                                };
+                                ui.colored_label(
+                                    egui::Color32::WHITE,
+                                    egui::RichText::new(format!("Sunrise 🌅 : {}", only_hour))
+                                        .size(24.0),
+                                );
+                                ui.add_space(5.0);
                                 //Wind Speed
                                 let color = get_metric_color(
                                     current.wind_speed_10m,
@@ -586,41 +622,59 @@ impl eframe::App for App {
                                 );
                                 draw_metric(
                                     ui,
-                                    "Wind Speed",
+                                    "Wind Speed 💨 ",
                                     current.wind_speed_10m,
                                     100.0,
                                     "km/h",
                                     color,
                                 );
+                                // Precipitation
                                 let color =
                                     get_metric_color(current.precipitation, 2.5, 5.0, 10.0, 15.0);
                                 draw_metric(
                                     ui,
-                                    "Precipitation",
+                                    "Precipitation 💧",
                                     current.precipitation,
                                     50.0,
                                     "mm",
                                     color,
                                 );
-                                ui.colored_label(
-                                    egui::Color32::WHITE,
-                                    egui::RichText::new(format!(
-                                        "Pressure : {} hPa",
-                                        current.surface_pressure
-                                    ))
-                                    .size(24.0),
-                                );
+                                //Max UV
                                 let color =
                                     get_metric_color(forecast.uv_index_max[0], 2.0, 5.0, 7.0, 10.0);
                                 draw_metric(
                                     ui,
-                                    "Max UV Index",
+                                    "Max UV Index 🔆",
                                     forecast.uv_index_max[0],
                                     11.0,
                                     " ",
                                     color,
                                 );
-                                // ui.colored_label(egui::Color32::WHITE,forecast.sunrise[0]);
+                                // Pressure
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    egui::RichText::new("Pressure 🕒").size(24.0).strong(),
+                                );
+
+                                let press_min = 950.0;
+                                let press_max = 1050.0;
+
+                                let press_progress = ((current.surface_pressure - press_min)
+                                    / (press_max - press_min))
+                                    .clamp(0.0, 1.0);
+
+                                ui.add(
+                                    egui::ProgressBar::new(press_progress)
+                                        .fill(get_pressure_color(current.surface_pressure))
+                                        .desired_width(200.0)
+                                        .text(
+                                            egui::RichText::new(format!(
+                                                "{} hPa",
+                                                current.surface_pressure
+                                            ))
+                                            .color(egui::Color32::BLACK),
+                                        ),
+                                );
                             });
                         });
                     });
@@ -654,6 +708,29 @@ impl eframe::App for App {
         }
     }
 }
+fn configure_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    fonts.font_data.insert(
+        "emoji_font".to_owned(),
+        egui::FontData::from_static(include_bytes!("C:\\Windows\\Fonts\\seguiemj.ttf")),
+    );
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .push("emoji_font".to_owned());
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .push("emoji_font".to_owned());
+
+    ctx.set_fonts(fonts);
+}
+
 #[tokio::main]
 async fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -663,6 +740,12 @@ async fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native("App", options, Box::new(|_cc| Box::new(App::default())))
+    eframe::run_native(
+        "App",
+        options,
+        Box::new(|cc| {
+            configure_fonts(&cc.egui_ctx);
+            Box::new(App::default())
+        }),
+    )
 }
-// 67
