@@ -126,7 +126,7 @@ fn get_metric_color(
     } else if val < limit_poor {
         egui::Color32::RED
     } else {
-        egui::Color32::from_rgb(52, 21, 57)
+        egui::Color32::from_rgb(82, 85, 89)
     }
 }
 fn get_pressure_color(val: f32) -> Color32 {
@@ -138,6 +138,19 @@ fn get_pressure_color(val: f32) -> Color32 {
         Color32::from_rgb(100, 200, 255) //presiune mare (anticiclon, cer senin)
     }
 }
+fn draw_button(
+    ui: &mut egui::Ui,
+    text: &str,
+    textcolor: egui::Color32,
+    size: f32,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+
+        ui.button(egui::RichText::new(text).size(size).color(textcolor))
+    })
+    .inner
+}
 fn draw_metric(ui: &mut egui::Ui, name: &str, val: f32, max: f32, unit: &str, color: Color32) {
     ui.colored_label(
         Color32::WHITE,
@@ -146,28 +159,28 @@ fn draw_metric(ui: &mut egui::Ui, name: &str, val: f32, max: f32, unit: &str, co
     let progress = (val / max).clamp(0.0, 1.0);
     let progress_bar = egui::ProgressBar::new(progress)
         .fill(color)
-        .desired_width(200.0)
+        .desired_width(250.0)
         .text(egui::RichText::new(format!("{} {}", val, unit)).color(egui::Color32::BLACK));
     ui.add(progress_bar);
 }
 fn get_weather_emoji(code: u32) -> &'static str {
     match code {
-        0 => "☀️",                    // Cer senin
-        1 => "🌤️",                    // Predominant senin
-        2 => "⛅",                    // Parțial noros
-        3 => "☁️",                    // Înnorat
-        45 | 48 => "🌫️",              // Ceață
-        51 | 53 | 55 => "drizzle 🌧️", // Burniță
-        56 | 57 => "🌧️❄️",            // Burniță care îngheață
-        61 | 63 | 65 => "🌧️",         // Ploaie
-        66 | 67 => "🌨️",              // Ploaie care îngheață
-        71 | 73 | 75 => "❄️",         // Ninsoare
-        77 => "🌨️",                   // Grăunțe de zăpadă
-        80..82 => "🌦️",               // Averse de ploaie
-        85 | 86 => "❄️🌨️",            // Averse de zăpadă
-        95 => "⛈️",                   // Furtună
-        96 | 99 => "⛈️🌨️",            // Furtună cu grindină
-        _ => "❓",                    // Necunoscut
+        0 => "☀️",            // Cer senin
+        1 => "🌤️",            // Predominant senin
+        2 => "⛅",            // Parțial noros
+        3 => "☁️",            // Înnorat
+        45 | 48 => "🌫️",      // Ceață
+        51 | 53 | 55 => "🌧️", // Burniță (am scos textul "drizzle")
+        56 | 57 => "🌨️",      // Burniță înghețată (doar un icon)
+        61 | 63 | 65 => "🌧️", // Ploaie
+        66 | 67 => "🌨️",      // Ploaie înghețată
+        71 | 73 | 75 => "❄️", // Ninsoare
+        77 => "🌨️",           // Grăunțe de zăpadă
+        80..82 => "🌦️",       // Averse de ploaie
+        85 | 86 => "🌨️",      // Averse de zăpadă
+        95 => "⛈️",           // Furtună
+        96 | 99 => "⛈️",      // Furtună cu grindină
+        _ => "❓",            // Necunoscut
     }
 }
 
@@ -178,19 +191,19 @@ async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
     );
     let geo_resp = match reqwest::get(&geo_url).await {
         Ok(resp) => resp,
-        Err(e) => return Err(format!("Eroare rețea GEO: {}", e)),
+        Err(e) => return Err(format!("GEO network error: {}", e)),
     };
     let geo_data = match geo_resp.json::<GeoSearch>().await {
         Ok(data) => data,
-        Err(e) => return Err(format!("Eroare JSON Geo: {}", e)),
+        Err(e) => return Err(format!("JSON parsing error: {}", e)),
     };
     let results = match geo_data.results {
         Some(r) => r,
-        None => return Err("Nu am primit lista de rezultate.".to_string()),
+        None => return Err("No results received".to_string()),
     };
     let loc = match results.first() {
         Some(l) => l.clone(),
-        None => return Err("Orașul nu a fost găsit.".to_string()),
+        None => return Err("City not found".to_string()),
     };
     let weather_url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code,surface_pressure,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,uv_index_max,sunrise&timezone=auto&forecast_days=7&hourly=temperature_2m",
@@ -203,21 +216,21 @@ async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
     let w_task = async {
         let w_resp = match reqwest::get(&weather_url).await {
             Ok(resp) => resp,
-            Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
+            Err(e) => return Err(format!("Weather network error: {}", e)),
         };
         match w_resp.json::<WeatherResponse>().await {
             Ok(data) => Ok(data),
-            Err(e) => Err(format!("Eroare JSON Vreme: {}", e)),
+            Err(e) => Err(format!("Weather JSON parsing error: {}", e)),
         }
     };
     let aqi_task = async {
         let aqi_resp = match reqwest::get(&poluation_url).await {
             Ok(resp) => resp,
-            Err(e) => return Err(format!("Eroare rețea Vreme: {}", e)),
+            Err(e) => return Err(format!("AQI Network error: {}", e)),
         };
         match aqi_resp.json::<AirQualityResponse>().await {
             Ok(data) => Ok(data),
-            Err(e) => Err(format!("Eroare JSON Vreme: {}", e)),
+            Err(e) => Err(format!("AQI JSON Parsing error:  {}", e)),
         }
     };
     let (w_result, aqi_result) = tokio::join!(w_task, aqi_task);
@@ -247,7 +260,7 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
-            city_name: "Bucuresti".to_owned(),
+            city_name: "".to_owned(),
             cur_state: AppState::Search,
             promise: None,
             favorites: Favorites::load(),
@@ -284,26 +297,30 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| match &self.cur_state {
             AppState::Search => {
                 ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
-                    ui.heading(egui::RichText::new("Weather Dashboard").size(24.0).strong());
+                    ui.heading(
+                        egui::RichText::new("Weather Dashboard")
+                            .size(24.0)
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    );
                     ui.add_space(250.0);
-                    ui.label(egui::RichText::new("Introduceti locatia").size(24.0));
+                    ui.label(
+                        egui::RichText::new("Search a location")
+                            .size(24.0)
+                            .color(egui::Color32::WHITE),
+                    );
                     ui.scope(|ui| {
                         ui.set_max_width(340.0);
                         ui.horizontal(|ui| {
-                            ui.add(
+                            let response = ui.add(
                                 egui::TextEdit::singleline(&mut self.city_name)
                                     .font(egui::FontId::proportional(20.0))
                                     .desired_width(300.0)
                                     .horizontal_align(egui::Align::Center),
                             );
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("🔎").size(24.0).color(Color32::WHITE),
-                                    )
-                                    .frame(false),
-                                )
-                                .clicked()
+                            if draw_button(ui, "🔎", egui::Color32::WHITE, 24.0).clicked()
+                                || (response.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                             {
                                 let city = self.city_name.clone();
                                 self.cur_state = AppState::Loading;
@@ -318,57 +335,80 @@ impl eframe::App for App {
                     ui.scope(|ui| {
                         ui.set_max_width(300.0);
                         ui.collapsing(
-                            RichText::new("⭐ Locații Favorite")
-                                .strong()
-                                .color(Color32::GOLD),
+                            RichText::new("⭐ Favorites").strong().color(Color32::GOLD),
                             |ui| {
                                 ui.add_space(10.0);
-                                let favs = self.favorites.locations.clone();
+                                egui::ScrollArea::vertical()
+                                    .max_height(150.0)
+                                    .auto_shrink([false, true])
+                                    .show(ui, |ui| {
+                                        let favs = self.favorites.locations.clone();
 
-                                for location in favs {
-                                    ui.horizontal(|ui| {
-                                        ui.set_width(300.0);
+                                        for location in favs {
+                                            ui.horizontal(|ui| {
+                                                ui.set_width(300.0);
 
-                                        ui.with_layout(
-                                            egui::Layout::top_down(Align::Center),
-                                            |ui| {
-                                                ui.horizontal(|ui| {
-                                                    if ui
-                                                        .button(RichText::new(&location).size(18.0))
-                                                        .clicked()
-                                                    {
-                                                        self.city_name = location.clone();
-                                                        self.cur_state = AppState::Loading;
-                                                        let location_clone = location.clone();
-                                                        self.promise = Some(Promise::spawn_async(
-                                                            async move {
-                                                                fetch_weather(location_clone).await
-                                                            },
-                                                        ));
-                                                    }
+                                                ui.with_layout(
+                                                    egui::Layout::top_down(Align::Center),
+                                                    |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            if draw_button(
+                                                                ui,
+                                                                &location,
+                                                                egui::Color32::WHITE,
+                                                                20.0,
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                self.city_name = location.clone();
+                                                                self.cur_state = AppState::Loading;
+                                                                let location_clone =
+                                                                    location.clone();
+                                                                self.promise =
+                                                                    Some(Promise::spawn_async(
+                                                                        async move {
+                                                                            fetch_weather(
+                                                                                location_clone,
+                                                                            )
+                                                                            .await
+                                                                        },
+                                                                    ));
+                                                            }
 
-                                                    if ui
-                                                        .small_button(
-                                                            RichText::new("❌").color(Color32::RED),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        self.favorites.remove(&location);
-                                                    }
-                                                });
-                                            },
-                                        );
+                                                            if draw_button(
+                                                                ui,
+                                                                "❌",
+                                                                egui::Color32::RED,
+                                                                20.0,
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                self.favorites.remove(&location);
+                                                            }
+                                                        });
+                                                    },
+                                                );
+                                            });
+                                            ui.add_space(5.0);
+                                        }
                                     });
-                                    ui.add_space(5.0);
-                                }
                             },
                         );
                     });
                 });
             }
             AppState::Loading => {
-                ui.spinner();
-                ui.label("please wait");
+                ui.vertical_centered(|ui| {
+                    ui.add_space(150.0);
+                    ui.add(egui::Spinner::new().size(60.0).color(egui::Color32::WHITE));
+
+                    ui.add_space(20.0);
+                    ui.label(
+                        RichText::new("Please wait...")
+                            .size(20.0)
+                            .color(egui::Color32::WHITE),
+                    );
+                });
             }
             AppState::Result {
                 location,
@@ -666,7 +706,7 @@ impl eframe::App for App {
                                 ui.add(
                                     egui::ProgressBar::new(press_progress)
                                         .fill(get_pressure_color(current.surface_pressure))
-                                        .desired_width(200.0)
+                                        .desired_width(250.0)
                                         .text(
                                             egui::RichText::new(format!(
                                                 "{} hPa",
@@ -683,23 +723,26 @@ impl eframe::App for App {
                 ui.vertical_centered(|ui| {
                     card_style.show(ui, |ui| {
                         ui.set_max_width(10.0);
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("🏠").size(40.0).color(Color32::WHITE),
-                                )
-                                .frame(false),
-                            )
-                            .clicked()
-                        {
+                        if draw_button(ui, "🏠", egui::Color32::WHITE, 40.0).clicked() {
                             next_state = Some(AppState::Search);
                         }
                     });
                 });
             }
 
-            AppState::Error(_err) => {
-                ui.heading("eroare");
+            AppState::Error(err_msg) => {
+                let err_msg_clone = err_msg.clone();
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+                    ui.heading(RichText::new("error").color(Color32::RED).size(30.0));
+                    ui.add_space(20.0);
+                    ui.label(RichText::new(&err_msg_clone).size(18.0));
+                    ui.add_space(20.0);
+
+                    if ui.button("Back").clicked() {
+                        next_state = Some(AppState::Search);
+                    }
+                });
             }
         });
 
