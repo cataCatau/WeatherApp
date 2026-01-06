@@ -406,6 +406,18 @@ impl App {
             });
         });
     }
+    fn show_error_screen(&mut self, ui: &mut egui::Ui,err_msg:String) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(100.0);
+            ui.heading(RichText::new("error").color(Color32::RED).size(30.0));
+            ui.add_space(20.0);
+            ui.label(RichText::new(&err_msg).size(18.0));
+            ui.add_space(20.0);
+            if ui.button("Back").clicked() {
+                self.cur_state = AppState::Search;
+            }
+        });
+    }
 }
 
 impl eframe::App for App {
@@ -449,16 +461,7 @@ impl eframe::App for App {
                 self.show_results_screen(ui, &location, &current, &hourly, &forecast, &aqi);
             }
             AppState::Error(err_msg) => {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(100.0);
-                    ui.heading(RichText::new("error").color(Color32::RED).size(30.0));
-                    ui.add_space(20.0);
-                    ui.label(RichText::new(&err_msg).size(18.0));
-                    ui.add_space(20.0);
-                    if ui.button("Back").clicked() {
-                        self.cur_state = AppState::Search;
-                    }
-                });
+                self.show_error_screen(ui, err_msg);
             }
         });
     }

@@ -32,7 +32,7 @@ fn configure_fonts(ctx: &egui::Context) {
 }
 
 #[tokio::main]
-async fn main() -> eframe::Result<()> {
+async fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1920.0, 1080.0])
@@ -40,12 +40,14 @@ async fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
+   if let Err(e)= eframe::run_native(
         "App",
         options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
             Box::new(App::default())
         }),
-    )
+    ) {
+        eprintln!("Fatal Error while running GUI: {}",e);
+    }
 }
