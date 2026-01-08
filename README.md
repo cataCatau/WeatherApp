@@ -65,3 +65,10 @@ src/
 ├── api.rs        # Network requests and JSON deserialization models.
 ├── favorites.rs  # Logic for saving/loading favorite cities to JSON.
 └── ui.rs         # Custom UI styles, cards, and utility functions.
+```
+## 👤 Author
+**Catalin Tarca**
+
+**University: Alexandru Ioan Cuza University, Faculty of Computer Science**
+
+**GitHub: cataCatau**
