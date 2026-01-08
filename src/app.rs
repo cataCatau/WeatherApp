@@ -209,7 +209,7 @@ impl App {
                         .auto_shrink([true, true])
                         .show(ui, |ui| {
                             for i in 0..24 {
-                                ui.set_max_width(200.0);
+                                ui.set_width(151.0);
                                 ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
                                     let only_hour = match hourly.time[i].split('T').next_back() {
                                         Some(h) => h,
@@ -226,7 +226,7 @@ impl App {
                                             .color(Color32::WHITE),
                                     );
                                 });
-                                ui.add_space(25.0);
+                                ui.add_space(50.0);
                             }
                         });
                 });
@@ -406,7 +406,7 @@ impl App {
             });
         });
     }
-    fn show_error_screen(&mut self, ui: &mut egui::Ui,err_msg:String) {
+    fn show_error_screen(&mut self, ui: &mut egui::Ui, err_msg: String) {
         ui.vertical_centered(|ui| {
             ui.add_space(100.0);
             ui.heading(RichText::new("error").color(Color32::RED).size(30.0));
