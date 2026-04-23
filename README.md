@@ -1,6 +1,6 @@
-# 🌦️ Rust Weather Dashboard
+# [🌦️Rust Weather Dashboard](https://d3on2ox9rpesz1.cloudfront.net)
 
-A high-performance, native desktop application for monitoring real-time weather and air quality. Built with **Rust** and **egui**, designed for speed, low resource usage, and responsiveness.
+A high-performance, cross-platform Weather Dashboard (Native Desktop + WebAssembly) deployed on AWS Global Infrastructure. Built with **Rust** and **egui**, designed for speed, low resource usage, and responsiveness.
 
 <img width="1919" height="985" alt="image" src="https://github.com/user-attachments/assets/208be9dc-c0a1-41a0-ae18-46bfa8b53aa8" />
 
@@ -22,49 +22,69 @@ Unlike resource-heavy web or Electron-based weather apps, this dashboard compile
 * **⭐ Persistent Favorites:** Save your favorite cities locally (stored in `favorites.json`).
 * **🎨 Custom UI:** Dark mode aesthetic with semi-transparent cards, dynamic color-coded progress bars, and custom emoji rendering.
 
+
 ## 🛠️ Tech Stack
 
 * **Language:** [Rust](https://www.rust-lang.org/) 🦀
 * **GUI Library:** [egui](https://github.com/emilk/egui) (Immediate Mode GUI) via `eframe`.
 * **Async Runtime:** [Tokio](https://tokio.rs/) (for non-blocking I/O).
-* **HTTP Client:** [Reqwest](https://docs.rs/reqwest/) (HTTPS requests).
-* **Serialization:** [Serde](https://serde.rs/) & `serde_json`.
+* **WASM Toolchain:** [Trunk](https://trunkrs.dev/) (for building and serving WebAssembly).
 * **API Provider:** [Open-Meteo](https://open-meteo.com/) (No API key required).
+* **Cloud Infrastructure:** AWS (Amazon S3 for storage, CloudFront for global CDN caching).
+* **Infrastructure as Code (IaC):** Terraform.
+* **CI/CD:** GitHub Actions (Automated build & deployment).
 
 ## ⚙️ Architecture & Implementation Details
 
-The application follows a modular architecture to separate concerns:
+The application follows a modular architecture to separate concerns, fully adapted for both native and cloud environments:
 
 * **State Management (`app.rs`):** Implements a state machine (`Search`, `Loading`, `Result`, `Error`) to manage the UI flow.
-* **Concurrent Networking (`api.rs`):** Uses `tokio::join!` to parallelize the Geocoding, Weather, and Air Quality requests, effectively halving the wait time for the user.
-* **Persistent Storage (`favorites.rs`):** Handles file I/O to save user preferences on the disk.
-* **UI Components (`ui.rs`):** Contains reusable widgets and helper functions for determining metric colors (e.g., changing AQI color from Green to Red based on pollution levels).
-* **Font Embedding:** The application embeds the `seguiemj.ttf` font binary directly into the executable to ensure consistent Emoji rendering across different Windows systems.
+* **Concurrent Networking (`api.rs`):** Uses `tokio::join!` (on desktop) and `wasm_bindgen_futures` (on web) to parallelize the Geocoding, Weather, and Air Quality requests, effectively halving the wait time for the user.
+* **Smart Persistence & Conditional Compilation:** Uses `#[cfg(target_arch = "wasm32")]` to handle environments differently. It uses local file I/O (`favorites.json`) for the desktop app, while falling back gracefully in the sandboxed WebAssembly environment.
+* **Asset Optimization:** Large assets (like external emoji fonts) are dynamically managed or excluded from the web build to ensure a lightning-fast download time for the `.wasm` binary.
+* **Cloud Architecture & CI/CD:** The web version is continuously deployed using **GitHub Actions**. Upon pushing to the `main` branch, the pipeline automatically compiles the Rust code to WASM, syncs the artifacts to an **AWS S3** bucket, and invalidates the **AWS CloudFront** cache for immediate, zero-downtime global updates.
 
 ## 📦 How to Run
 
 Ensure you have Rust and Cargo installed.
 
-1.  **Clone the repository:**
+**Clone the repository:**
     ```bash
     git clone [https://github.com/yourusername/weather-dashboard.git](https://github.com/yourusername/weather-dashboard.git)
     cd weather-dashboard
     ```
 
-2.  **Run in release mode (Recommended for performance):**
-    ```bash
-    cargo run --release
-    ```
+### Option A: Native Desktop App (Recommended for local use)
+Run the application natively on your OS for maximum performance and local storage capabilities:
+```bash
+cargo run --release
+```
+### Option B: Local Web Server (WASM)
+To test the WebAssembly build locally, make sure you have Trunk installed (cargo install trunk), then run:
+```bash
+trunk serve
+```
+
+### Option C: Cloud Deployment (CI/CD)
+The project includes a fully automated GitHub Actions workflow (.github/workflows/deploy.yml). Any push to the main branch will automatically:
+
+1.Build the WASM artifacts.
+2.Deploy to AWS S3.
+3.Invalidate the CloudFront CDN cache.
+(Note: Requires AWS credentials configured in GitHub Secrets).
 
 ## 📂 Project Structure
 
 ```text
 src/
-├── main.rs       # Entry point, window configuration, and font loading.
-├── app.rs        # Application logic, update loop, and screen rendering.
-├── api.rs        # Network requests and JSON deserialization models.
-├── favorites.rs  # Logic for saving/loading favorite cities to JSON.
-└── ui.rs         # Custom UI styles, cards, and utility functions.
+├── main.rs        # Entry point, window configuration, and web-runner setup.
+├── app.rs         # Application logic, update loop, and screen rendering.
+├── api.rs         # Network requests and JSON deserialization models.
+├── favorites.rs   # Logic for saving/loading favorite cities.
+└── ui.rs          # Custom UI styles, cards, and utility functions.
+.github/
+└── workflows/
+    └── deploy.yml # GitHub Actions CI/CD pipeline for AWS deployment.
 ```
 ## 👤 Author
 **Catalin Tarca**
