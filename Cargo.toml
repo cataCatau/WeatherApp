@@ -5,13 +5,22 @@ edition = "2024"
 
 [dependencies]
 egui = "0.27"
+futures = "0.3"
 eframe = { version = "0.27", features = ["wgpu"] }
-
-reqwest = { version = "0.12", features = ["json"] }
-
-tokio = { version = "1.36", features = ["full"] }
-
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-poll-promise = { version = "0.3", features = ["tokio"] }
 image = { version = "0.25", features = ["png", "jpeg"] }
+log = "0.4" 
+
+# Dependente pentru DESKTOP
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+poll-promise = { version = "0.3", features = ["tokio"] } 
+
+# Dependente pentru WEB (WASM)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+reqwest = { version = "0.11", features = ["json"] }
+getrandom = { version = "0.2", features = ["js"] }
+poll-promise = { version = "0.3", features = ["web"] } 

@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -8,6 +11,7 @@ pub struct Favorites {
 }
 
 impl Favorites {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load() -> Self {
         let path = Path::new("favorites.json");
         if path.exists() {
@@ -22,6 +26,12 @@ impl Favorites {
         Self::default()
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn load() -> Self {
+        Self::default()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self) {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
@@ -32,6 +42,9 @@ impl Favorites {
             Err(e) => eprintln!("Error during serialization: {}", e),
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn save(&self) {}
 
     pub fn add(&mut self, city: String) {
         if !self.locations.contains(&city) {

@@ -112,7 +112,7 @@ pub async fn fetch_weather(city: String) -> Result<FullWeatherData, String> {
         }
     };
 
-    let (w_result, aqi_result) = tokio::join!(w_task, aqi_task);
+    let (w_result, aqi_result) = futures::join!(w_task, aqi_task);
 
     let w_data = match w_result {
         Ok(data) => data,

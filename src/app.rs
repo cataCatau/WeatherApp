@@ -74,9 +74,20 @@ impl App {
                         {
                             let city = self.city_name.clone();
                             self.cur_state = AppState::Loading;
-                            self.promise = Some(Promise::spawn_async(async move {
-                                api::fetch_weather(city).await
-                            }));
+
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                self.promise = Some(Promise::spawn_async(async move {
+                                    api::fetch_weather(city).await
+                                }));
+                            }
+
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                self.promise = Some(Promise::spawn_local(async move {
+                                    api::fetch_weather(city).await
+                                }));
+                            }
                         }
                     });
                 });
@@ -114,12 +125,30 @@ impl App {
                                                         self.city_name = location.clone();
                                                         self.cur_state = AppState::Loading;
                                                         let location_clone = location.clone();
-                                                        self.promise = Some(Promise::spawn_async(
-                                                            async move {
-                                                                api::fetch_weather(location_clone)
+
+                                                        #[cfg(not(target_arch = "wasm32"))]
+                                                        {
+                                                            self.promise = Some(
+                                                                Promise::spawn_async(async move {
+                                                                    api::fetch_weather(
+                                                                        location_clone,
+                                                                    )
                                                                     .await
-                                                            },
-                                                        ));
+                                                                }),
+                                                            );
+                                                        }
+
+                                                        #[cfg(target_arch = "wasm32")]
+                                                        {
+                                                            self.promise = Some(
+                                                                Promise::spawn_local(async move {
+                                                                    api::fetch_weather(
+                                                                        location_clone,
+                                                                    )
+                                                                    .await
+                                                                }),
+                                                            );
+                                                        }
                                                     }
                                                     if ui::draw_button(ui, "❌", Color32::RED, 20.0)
                                                         .clicked()
@@ -448,21 +477,25 @@ impl eframe::App for App {
 
         let state = self.cur_state.clone();
 
-        egui::CentralPanel::default().show(ctx, |ui| match state {
-            AppState::Search => self.show_search_screen(ui),
-            AppState::Loading => self.show_loading_screen(ui),
-            AppState::Result {
-                location,
-                current,
-                hourly,
-                forecast,
-                aqi,
-            } => {
-                self.show_results_screen(ui, &location, &current, &hourly, &forecast, &aqi);
-            }
-            AppState::Error(err_msg) => {
-                self.show_error_screen(ui, err_msg);
-            }
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| match state {
+                    AppState::Search => self.show_search_screen(ui),
+                    AppState::Loading => self.show_loading_screen(ui),
+                    AppState::Result {
+                        location,
+                        current,
+                        hourly,
+                        forecast,
+                        aqi,
+                    } => {
+                        self.show_results_screen(ui, &location, &current, &hourly, &forecast, &aqi);
+                    }
+                    AppState::Error(err_msg) => {
+                        self.show_error_screen(ui, err_msg);
+                    }
+                });
         });
     }
 }

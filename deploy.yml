@@ -1,0 +1,69 @@
+name: CD Weather App - Sync Only
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: eu-central-1
+  RUST_VERSION: stable
+  BUCKET_NAME: weather-app-catacatau 
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+        targets: wasm32-unknown-unknown
+
+    
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    
+    - name: Install Trunk
+      run: |
+        wget -qO- https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+        mv trunk /usr/local/bin/
+
+   
+    - name: Build WASM App
+      run: trunk build --release
+
+    
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    
+    - name: Deploy to S3
+      run: |
+        aws s3 sync ./dist s3://${{ env.BUCKET_NAME }} --delete
+
+    
+    - name: Fix WASM MIME Type
+      run: |
+        aws s3 sync ./dist s3://${{ env.BUCKET_NAME }} \
+          --exclude "*" --include "*.wasm" \
+          --content-type "application/wasm" --metadata-directive REPLACE
+
+    
+    - name: Invalidate CloudFront
+      run: |
+        DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Origins.Items[0].DomainName=='${{ env.BUCKET_NAME }}.s3.${{ env.AWS_REGION }}.amazonaws.com'].Id" --output text)
+        if [ "$DIST_ID" != "None" ]; then
+          aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+        else
+          echo "Could not find CloudFront Distribution for this bucket."
+        fi
