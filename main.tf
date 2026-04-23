@@ -15,12 +15,10 @@ locals {
   bucket_name = "weather-app-catacatau"
 }
 
-# 1. Bucket S3 pentru stocarea fișierelor statice (WASM, HTML, JS)
 resource "aws_s3_bucket" "frontend" {
   bucket = local.bucket_name
 }
 
-# 2. Blocăm accesul public direct
 resource "aws_s3_bucket_public_access_block" "frontend_block" {
   bucket                  = aws_s3_bucket.frontend.id
   block_public_acls       = true
@@ -29,7 +27,6 @@ resource "aws_s3_bucket_public_access_block" "frontend_block" {
   restrict_public_buckets = true
 }
 
-# 3. Origin Access Control (OAC)
 resource "aws_cloudfront_origin_access_control" "oac" {
   name                              = "oac-${local.bucket_name}"
   description                       = "OAC for Weather App Frontend"
@@ -38,7 +35,6 @@ resource "aws_cloudfront_origin_access_control" "oac" {
   signing_protocol                  = "sigv4"
 }
 
-# 4. Distribuția CloudFront 
 resource "aws_cloudfront_distribution" "cdn" {
   enabled             = true
   is_ipv6_enabled     = true
